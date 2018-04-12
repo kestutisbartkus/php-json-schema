@@ -1,0 +1,100 @@
+[
+  {
+    "description": "Multi-type",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "cmd": {
+          "type": "string"
+        },
+        "inputStates": {
+          "type": [
+            "string",
+            "array"
+          ],
+          "uniqueItems": true,
+          "maxLength": 1,
+          "pattern": "^\\*$",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "outputState": {
+          "type": "integer"
+        },
+        "rights": {
+          "type": [
+            "string",
+            "array"
+          ],
+          "uniqueItems": true,
+          "maxLength": 1,
+          "pattern": "^\\*$",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "params": {
+          "type": "object",
+          "minProperties": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "cmd",
+        "inputStates",
+        "outputState"
+      ]
+    },
+    "tests": [
+      {
+        "description": "valid with int[]",
+        "data": {
+          "label": "reset",
+          "cmd": "default.reset",
+          "inputStates": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "outputState": 0,
+          "rights": [
+            2
+          ]
+        },
+        "valid": true
+      },
+      {
+        "description": "valid with string",
+        "data": {
+          "label": "reset",
+          "cmd": "default.reset",
+          "inputStates": "*",
+          "outputState": 0,
+          "rights": [
+            2
+          ]
+        },
+        "valid": true
+      },
+      {
+        "description": "invalid with wrong string",
+        "data": {
+          "label": "reset",
+          "cmd": "default.reset",
+          "inputStates": "abc",
+          "outputState": 0,
+          "rights": [
+            2
+          ]
+        },
+        "valid": false
+      }
+    ]
+  }
+]
