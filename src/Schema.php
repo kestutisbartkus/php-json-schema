@@ -87,6 +87,8 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
 
     private $__booleanSchema;
 
+    private $__fails = [];
+
     public function addPropertyMapping($dataName, $propertyName, $mapping = self::DEFAULT_MAPPING)
     {
         $this->__dataToProperty[$mapping][$dataName] = $propertyName;
@@ -147,11 +149,12 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
      */
     public function in($data, Context $options = null)
     {
+        $options->fails = [];
         if (null !== $this->__booleanSchema) {
             if ($this->__booleanSchema) {
                 return $data;
             } elseif (empty($options->skipValidation)) {
-                $this->fail(new InvalidValue('Denied by false schema'), '#');
+                return $this->fail(new InvalidValue('Denied by false schema'), '#', $options);
             }
         }
 
@@ -173,9 +176,20 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
 
         $options->refResolver->preProcessReferences($data, $options);
 
-        return $this->process($data, $options, '#');
+        $result = $this->process($data, $options, '#');
+
+        $this->__fails = $options->fails;
+
+        return $result;
     }
 
+    /**
+     * @return array
+     */
+    public function getFails(): array
+    {
+        return $this->__fails;
+    }
 
     /**
      * @param mixed $data
@@ -213,7 +227,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
             $this->fail(new TypeException(ucfirst(
                     implode(', ', is_array($this->type) ? $this->type : array($this->type))
                     . ' expected, ' . json_encode($data) . ' received')
-            ), $path);
+            ), $path, $options);
         }
     }
 
@@ -223,7 +237,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
      * @throws InvalidValue
      * @throws \Exception
      */
-    private function processEnum($data, $path = '#')
+    private function processEnum($data, $options, $path = '#')
     {
         $enumOk = false;
         foreach ($this->enum as $item) {
@@ -241,7 +255,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
             }
         }
         if (!$enumOk) {
-            $this->fail(new EnumException('Enum failed, enum: ' . json_encode($this->enum) . ', data: ' . json_encode($data)), $path);
+            return $this->fail(new EnumException('Enum failed, enum: ' . json_encode($this->enum) . ', data: ' . json_encode($data)), $path, $options);
         }
     }
 
@@ -251,7 +265,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
      * @throws InvalidValue
      * @throws \Swaggest\JsonDiff\Exception
      */
-    private function processConst($data, $path)
+    private function processConst($data, $options, $path)
     {
         if ($this->const !== $data) {
             if ((is_object($this->const) && is_object($data))
@@ -259,10 +273,10 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                 $diff = new JsonDiff($this->const, $data,
                     JsonDiff::STOP_ON_DIFF);
                 if ($diff->getDiffCnt() != 0) {
-                    $this->fail(new ConstException('Const failed'), $path);
+                    return $this->fail(new ConstException('Const failed'), $path, $options);
                 }
             } else {
-                $this->fail(new ConstException('Const failed'), $path);
+                return $this->fail(new ConstException('Const failed'), $path, $options);
             }
         }
     }
@@ -284,7 +298,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
             // Expected exception
         }
         if ($exception === false) {
-            $this->fail(new LogicException('Not ' . json_encode($this->not) . ' expected, ' . json_encode($data) . ' received'), $path . '->not');
+            return $this->fail(new LogicException('Not ' . json_encode($this->not) . ' expected, ' . json_encode($data) . ' received'), $path . '->not', $options);
         }
     }
 
@@ -293,29 +307,29 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
      * @param string $path
      * @throws InvalidValue
      */
-    private function processString($data, $path)
+    private function processString($data, $options, $path)
     {
         if ($this->minLength !== null) {
             if (mb_strlen($data, 'UTF-8') < $this->minLength) {
-                $this->fail(new StringException('String is too short', StringException::TOO_SHORT), $path);
+                return $this->fail(new StringException('String is too short', StringException::TOO_SHORT), $path, $options);
             }
         }
         if ($this->maxLength !== null) {
             if (mb_strlen($data, 'UTF-8') > $this->maxLength) {
-                $this->fail(new StringException('String is too long', StringException::TOO_LONG), $path);
+                return $this->fail(new StringException('String is too long', StringException::TOO_LONG), $path, $options);
             }
         }
         if ($this->pattern !== null) {
             if (0 === preg_match(Helper::toPregPattern($this->pattern), $data)) {
-                $this->fail(new StringException(json_encode($data) . ' does not match to '
-                    . $this->pattern, StringException::PATTERN_MISMATCH), $path);
+                return $this->fail(new StringException(json_encode($data) . ' does not match to '
+                    . $this->pattern, StringException::PATTERN_MISMATCH), $path, $options);
             }
         }
         if ($this->format !== null) {
             $validationError = Format::validationError($this->format, $data);
             if ($validationError !== null) {
                 if (!($this->format === "uri" && substr($path, -3) === ':id')) {
-                    $this->fail(new StringException($validationError), $path);
+                    return $this->fail(new StringException($validationError), $path, $options);
                 }
             }
         }
@@ -326,43 +340,43 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
      * @param string $path
      * @throws InvalidValue
      */
-    private function processNumeric($data, $path)
+    private function processNumeric($data, $options, $path)
     {
         if ($this->multipleOf !== null) {
             $div = $data / $this->multipleOf;
             if ($div != (int)$div) {
-                $this->fail(new NumericException($data . ' is not multiple of ' . $this->multipleOf, NumericException::MULTIPLE_OF), $path);
+                return $this->fail(new NumericException($data . ' is not multiple of ' . $this->multipleOf, NumericException::MULTIPLE_OF), $path, $options);
             }
         }
 
         if ($this->exclusiveMaximum !== null && !is_bool($this->exclusiveMaximum)) {
             if ($data >= $this->exclusiveMaximum) {
-                $this->fail(new NumericException(
+                return $this->fail(new NumericException(
                     'Value less or equal than ' . $this->exclusiveMaximum . ' expected, ' . $data . ' received',
-                    NumericException::MAXIMUM), $path);
+                    NumericException::MAXIMUM), $path,$options);
             }
         }
 
         if ($this->exclusiveMinimum !== null && !is_bool($this->exclusiveMinimum)) {
             if ($data <= $this->exclusiveMinimum) {
-                $this->fail(new NumericException(
+                return $this->fail(new NumericException(
                     'Value more or equal than ' . $this->exclusiveMinimum . ' expected, ' . $data . ' received',
-                    NumericException::MINIMUM), $path);
+                    NumericException::MINIMUM), $path, $options);
             }
         }
 
         if ($this->maximum !== null) {
             if ($this->exclusiveMaximum === true) {
                 if ($data >= $this->maximum) {
-                    $this->fail(new NumericException(
+                    return $this->fail(new NumericException(
                         'Value less or equal than ' . $this->maximum . ' expected, ' . $data . ' received',
-                        NumericException::MAXIMUM), $path);
+                        NumericException::MAXIMUM), $path, $options);
                 }
             } else {
                 if ($data > $this->maximum) {
-                    $this->fail(new NumericException(
+                    return $this->fail(new NumericException(
                         'Value less than ' . $this->maximum . ' expected, ' . $data . ' received',
-                        NumericException::MAXIMUM), $path);
+                        NumericException::MAXIMUM), $path, $options);
                 }
             }
         }
@@ -370,15 +384,15 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
         if ($this->minimum !== null) {
             if ($this->exclusiveMinimum === true) {
                 if ($data <= $this->minimum) {
-                    $this->fail(new NumericException(
+                    return $this->fail(new NumericException(
                         'Value more or equal than ' . $this->minimum . ' expected, ' . $data . ' received',
-                        NumericException::MINIMUM), $path);
+                        NumericException::MINIMUM), $path, $options);
                 }
             } else {
                 if ($data < $this->minimum) {
-                    $this->fail(new NumericException(
+                    return $this->fail(new NumericException(
                         'Value more than ' . $this->minimum . ' expected, ' . $data . ' received',
-                        NumericException::MINIMUM), $path);
+                        NumericException::MINIMUM), $path, $options);
                 }
             }
         }
@@ -430,14 +444,14 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                 $exception = new LogicException('No valid results for oneOf {' . "\n" . substr($failures, 0, -1) . "\n}");
                 $exception->error = 'No valid results for oneOf';
                 $exception->subErrors = $subErrors;
-                $this->fail($exception, $path);
+                return $this->fail($exception, $path, $options);
             } elseif ($successes > 1) {
                 $exception = new LogicException('More than 1 valid result for oneOf: '
                     . $successes . '/' . count($this->oneOf) . ' valid results for oneOf {'
                     . "\n" . substr($failures, 0, -1) . "\n}");
                 $exception->error = 'More than 1 valid result for oneOf';
                 $exception->subErrors = $subErrors;
-                $this->fail($exception, $path);
+                return $this->fail($exception, $path, $options);
             }
         }
         return $result;
@@ -477,7 +491,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                 . "\n}");
             $exception->error = 'No valid results for anyOf';
             $exception->subErrors = $subErrors;
-            $this->fail($exception, $path);
+            return $this->fail($exception, $path, $options);
         }
         return $result;
     }
@@ -544,7 +558,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                         $item = $this->__propertyToData[$options->mapping][$item];
                     }
                     if (!property_exists($data, $item)) {
-                        $this->fail(new ObjectException('Required property missing: ' . $item . ', data: ' . json_encode($data, JSON_UNESCAPED_SLASHES), ObjectException::REQUIRED), $path);
+                        return $this->fail(new ObjectException('Required property missing: ' . $item . ', data: ' . json_encode($data, JSON_UNESCAPED_SLASHES), ObjectException::REQUIRED), $path, $options);
                     }
                 }
             } else {
@@ -553,7 +567,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                         $item = $this->__dataToProperty[$options->mapping][$item];
                     }
                     if (!property_exists($data, $item)) {
-                        $this->fail(new ObjectException('Required property missing: ' . $item . ', data: ' . json_encode($data, JSON_UNESCAPED_SLASHES), ObjectException::REQUIRED), $path);
+                        return $this->fail(new ObjectException('Required property missing: ' . $item . ', data: ' . json_encode($data, JSON_UNESCAPED_SLASHES), ObjectException::REQUIRED), $path, $options);
                     }
                 }
             }
@@ -561,7 +575,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
         } else {
             foreach ($this->required as $item) {
                 if (!property_exists($data, $item)) {
-                    $this->fail(new ObjectException('Required property missing: ' . $item . ', data: ' . json_encode($data, JSON_UNESCAPED_SLASHES), ObjectException::REQUIRED), $path);
+                    return $this->fail(new ObjectException('Required property missing: ' . $item . ', data: ' . json_encode($data, JSON_UNESCAPED_SLASHES), ObjectException::REQUIRED), $path,$options);
                 }
             }
         }
@@ -722,7 +736,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                     }
                 }
             } catch (InvalidValue $exception) {
-                $this->fail($exception, $path);
+                return $this->fail($exception, $path, $options);
             }
         }
 
@@ -759,10 +773,10 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
 
         if (!$options->skipValidation) {
             if ($this->minProperties !== null && count($array) < $this->minProperties) {
-                $this->fail(new ObjectException("Not enough properties", ObjectException::TOO_FEW), $path);
+                return $this->fail(new ObjectException("Not enough properties", ObjectException::TOO_FEW), $path, $options);
             }
             if ($this->maxProperties !== null && count($array) > $this->maxProperties) {
-                $this->fail(new ObjectException("Too many properties", ObjectException::TOO_MANY), $path);
+                return $this->fail(new ObjectException("Too many properties", ObjectException::TOO_MANY), $path, $options);
             }
             if ($this->propertyNames !== null) {
                 $propertyNames = self::unboolSchema($this->propertyNames);
@@ -794,7 +808,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
 
         foreach ($array as $key => $value) {
             if ($key === '' && PHP_VERSION_ID < 71000) {
-                $this->fail(new InvalidValue('Empty property name'), $path);
+                return $this->fail(new InvalidValue('Empty property name'), $path, $options);
             }
 
             $found = false;
@@ -809,8 +823,8 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                     } else {
                         foreach ($dependencies as $item) {
                             if (!property_exists($data, $item)) {
-                                $this->fail(new ObjectException('Dependency property missing: ' . $item,
-                                    ObjectException::DEPENDENCY_MISSING), $path);
+                                return $this->fail(new ObjectException('Dependency property missing: ' . $item,
+                                    ObjectException::DEPENDENCY_MISSING), $path, $options);
                             }
                         }
                     }
@@ -856,7 +870,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
             }
             if (!$found && $this->additionalProperties !== null) {
                 if (!$options->skipValidation && $this->additionalProperties === false) {
-                    $this->fail(new ObjectException('Additional properties not allowed: ' . $key), $path);
+                    return $this->fail(new ObjectException('Additional properties not allowed: ' . $key), $path, $options);
                 }
 
                 if ($this->additionalProperties instanceof SchemaContract) {
@@ -906,11 +920,11 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
         $count = count($data);
         if (!$options->skipValidation) {
             if ($this->minItems !== null && $count < $this->minItems) {
-                $this->fail(new ArrayException("Not enough items in array"), $path);
+                return $this->fail(new ArrayException("Not enough items in array"), $path, $options);
             }
 
             if ($this->maxItems !== null && $count > $this->maxItems) {
-                $this->fail(new ArrayException("Too many items in array"), $path);
+                return $this->fail(new ArrayException("Too many items in array"), $path, $options);
             }
         }
 
@@ -943,7 +957,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                     $result[$key] = $additionalItems->process($value, $options, $path . '->' . $pathItems
                         . '[' . $index . ']:' . $index);
                 } elseif (!$options->skipValidation && $additionalItems === false) {
-                    $this->fail(new ArrayException('Unexpected array item'), $path);
+                    return $this->fail(new ArrayException('Unexpected array item'), $path, $options);
                 }
             }
             ++$index;
@@ -951,7 +965,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
 
         if (!$options->skipValidation && $this->uniqueItems) {
             if (!UniqueItems::isValid($data)) {
-                $this->fail(new ArrayException('Array is not unique'), $path);
+                return $this->fail(new ArrayException('Array is not unique'), $path, $options);
             }
         }
 
@@ -959,10 +973,10 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
             /** @var Schema|bool $contains */
             $contains = $this->contains;
             if ($contains === false) {
-                $this->fail(new ArrayException('Contains is false'), $path);
+                return $this->fail(new ArrayException('Contains is false'), $path,$options);
             }
             if ($count === 0) {
-                $this->fail(new ArrayException('Empty array fails contains constraint'), $path);
+                return $this->fail(new ArrayException('Empty array fails contains constraint'), $path, $options);
             }
             if ($contains === true) {
                 $contains = self::unboolSchema($contains);
@@ -977,7 +991,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                 }
             }
             if (!$containsOk) {
-                $this->fail(new ArrayException('Array fails contains constraint'), $path);
+                return $this->fail(new ArrayException('Array fails contains constraint'), $path, $options);
             }
         }
         return $result;
@@ -999,7 +1013,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                 Content::process($options, $this->contentEncoding, $this->contentMediaType, $data, true);
             }
         } catch (InvalidValue $exception) {
-            $this->fail($exception, $path);
+            return $this->fail($exception, $path, $options);
         }
         return $data;
     }
@@ -1098,11 +1112,11 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
         }
 
         if ($this->enum !== null) {
-            $this->processEnum($data, $path);
+            $this->processEnum($data, $options, $path);
         }
 
         if (array_key_exists(self::CONST_PROPERTY, $this->__arrayOfData)) {
-            $this->processConst($data, $path);
+            $this->processConst($data, $options, $path);
         }
 
         if ($this->not !== null) {
@@ -1110,11 +1124,11 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
         }
 
         if (is_string($data)) {
-            $this->processString($data, $path);
+            $this->processString($data, $options, $path);
         }
 
         if (is_int($data) || is_float($data)) {
-            $this->processNumeric($data, $path);
+            $this->processNumeric($data, $options, $path);
         }
 
         if ($this->if !== null) {
@@ -1168,10 +1182,11 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
      * @param string $path
      * @throws InvalidValue
      */
-    private function fail(InvalidValue $exception, $path)
+    private function fail(InvalidValue $exception, $path, $options)
     {
         $exception->addPath($path);
-        throw $exception;
+        $options->fails[] = $exception;
+        return false;
     }
 
     public static function integer()
