@@ -13,12 +13,34 @@ trait ObjectItemTrait
 {
     use MagicMapTrait;
 
-    /** @var ObjectItem[] */
+    /** @var ObjectItemContract[] */
     protected $__nestedObjects;
     protected $__documentPath;
+    /** @var null|string[] */
     protected $__fromRef;
 
-    public function getNestedObject($className) {
+    protected $__hasResolvedValue = false;
+    protected $__resolvedValue;
+
+    public function setResolvedValue($value)
+    {
+        $this->__hasResolvedValue = true;
+        $this->__resolvedValue = $value;
+        return $this;
+    }
+
+    public function getResolvedValue()
+    {
+        return $this->__resolvedValue;
+    }
+
+    public function hasResolvedValue()
+    {
+        return $this->__hasResolvedValue;
+    }
+
+    public function getNestedObject($className)
+    {
         if (isset($this->__nestedObjects[$className])) {
             return $this->__nestedObjects[$className];
         }
@@ -28,6 +50,7 @@ trait ObjectItemTrait
     public function setNestedProperty($propertyName, $value, Egg $nestedEgg)
     {
         $nestedName = $nestedEgg->name;
+        /** @var null $nested */
         $nested = &$this->__nestedObjects[$nestedName];
         if (null === $nested) {
             $nested = $nestedEgg->classSchema->makeObjectItem();
@@ -41,24 +64,31 @@ trait ObjectItemTrait
     }
 
     protected $__additionalPropertyNames;
+
     public function addAdditionalPropertyName($name)
     {
-        $this->__additionalPropertyNames[] = $name;
+        $this->__additionalPropertyNames[$name] = true;
     }
 
     /**
-     * @return null|string[]
+     * @return string[]
      */
     public function getAdditionalPropertyNames()
     {
-        return $this->__additionalPropertyNames;
+        if (null === $this->__additionalPropertyNames) {
+            return [];
+        }
+        return array_keys($this->__additionalPropertyNames);
     }
 
+    /**
+     * @var string[][]
+     */
     protected $__patternPropertyNames;
 
     public function addPatternPropertyName($pattern, $name)
     {
-        $this->__patternPropertyNames[$pattern][] = $name;
+        $this->__patternPropertyNames[$pattern][$name] = true;
     }
 
     /**
@@ -68,10 +98,9 @@ trait ObjectItemTrait
     public function getPatternPropertyNames($pattern)
     {
         if (isset($this->__patternPropertyNames[$pattern])) {
-            return $this->__patternPropertyNames[$pattern];
-        } else {
-            return null;
+            return array_keys($this->__patternPropertyNames[$pattern]);
         }
+        return null;
     }
 
     public function jsonSerialize()
@@ -96,7 +125,7 @@ trait ObjectItemTrait
     {
         return $this->__documentPath;
     }
-    
+
     public function setDocumentPath($path)
     {
         $this->__documentPath = $path;
@@ -104,11 +133,11 @@ trait ObjectItemTrait
     }
 
     /**
-     * @see ObjectItemContract::getFromRef
+     * @return string|null
      * @deprecated use ObjectItemContract::getFromRefs
      * @see ObjectItemContract::getFromRefs
      * @todo remove
-     * @return string
+     * @see ObjectItemContract::getFromRef
      */
     public function getFromRef()
     {
@@ -116,8 +145,8 @@ trait ObjectItemTrait
     }
 
     /**
-     * @see ObjectItemContract::getFromRef
      * @return string[]|null
+     * @see ObjectItemContract::getFromRef
      */
     public function getFromRefs()
     {
@@ -125,9 +154,9 @@ trait ObjectItemTrait
     }
 
     /**
-     * @see ObjectItemContract::setFromRef
-     * @param string $ref
+     * @param false|string $ref
      * @return $this
+     * @see ObjectItemContract::setFromRef
      */
     public function setFromRef($ref)
     {
@@ -142,7 +171,9 @@ trait ObjectItemTrait
     }
 
     private $__refPath;
-    protected function getFromRefPath() {
+
+    protected function getFromRefPath()
+    {
         if ($this->__refPath === null) {
             $this->__refPath = '';
             if ($this->__fromRef) {

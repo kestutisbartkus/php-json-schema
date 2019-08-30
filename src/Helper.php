@@ -7,26 +7,11 @@ class Helper
 {
     /**
      * @param string $jsonPattern
-     * @return bool|string
-     * @throws InvalidValue
+     * @return string
      */
     public static function toPregPattern($jsonPattern)
     {
-        static $delimiters = array('/', '#', '+', '~', '%');
-
-        $pattern = false;
-        foreach ($delimiters as $delimiter) {
-            if (strpos($jsonPattern, $delimiter) === false) {
-                $pattern = $delimiter . $jsonPattern . $delimiter . 'u';
-                break;
-            }
-        }
-
-        if (false === $pattern) {
-            throw new InvalidValue('Failed to prepare preg pattern');
-        }
-
-        return $pattern;
+        return '{' . $jsonPattern . '}u';
     }
 
     /**
@@ -54,8 +39,9 @@ class Helper
                 $resultParts[0] = $currentParts[0];
             } elseif ('/' === substr($currentParts[0], 0, 1)) {
                 $resultParts[0] = $currentParts[0];
-                if ($pos = strpos($parentParts[0], '://')) {
-                    $resultParts[0] = substr($parentParts[0], 0, strpos($parentParts[0], '/', $pos + 3)) . $resultParts[0];
+                if (($pos = strpos($parentParts[0], '://'))
+                    && ($len = strpos($parentParts[0], '/', $pos + 3))) {
+                    $resultParts[0] = substr($parentParts[0], 0, $len) . $resultParts[0];
                 }
             } elseif (false !== $pos = strrpos($parentParts[0], '/')) {
                 $resultParts[0] = substr($parentParts[0], 0, $pos + 1) . $currentParts[0];

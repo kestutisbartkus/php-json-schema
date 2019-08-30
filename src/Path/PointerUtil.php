@@ -12,7 +12,7 @@ class PointerUtil
      * Path example: #->properties:responses->additionalProperties:envvar->properties:schema
      * @param string $path
      * @param bool $isURIFragmentId
-     * @return string
+     * @return string|null
      */
     public static function getSchemaPointer($path, $isURIFragmentId = false)
     {
@@ -43,7 +43,7 @@ class PointerUtil
 
                 if ($schemaPaths[0] === Schema::PROP_REF) {
                     $result[] = $pointer . '/' . JsonPointer::escapeSegment(Schema::PROP_REF, $isURIFragmentId);
-                    if (strpos($schemaPaths[1], '://')) {
+                    if ($schemaPaths[1][0] !== '#') { // Absolute URI.
                         $pointer = $schemaPaths[1];
                     } else {
                         $pointer = self::rebuildPointer($schemaPaths[1], $isURIFragmentId);
