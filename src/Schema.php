@@ -31,10 +31,11 @@ use Swaggest\JsonSchema\Structure\WithResolvedValue;
  * Class Schema
  * @package Swaggest\JsonSchema
  */
-class Schema extends JsonSchema implements MetaHolder, SchemaContract
+class Schema extends JsonSchema implements MetaHolder, SchemaContract, HasDefault
 {
     const ENUM_NAMES_PROPERTY = 'x-enum-names';
     const CONST_PROPERTY = 'const';
+    const DEFAULT_PROPERTY = 'default';
 
     const DEFAULT_MAPPING = 'default';
 
@@ -218,7 +219,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
      * @throws InvalidValue
      * @throws \Exception
      */
-    private function processType($data, Context $options, $path = '#')
+    private function processType(&$data, Context $options, $path = '#')
     {
         if ($options->tolerateStrings && is_string($data)) {
             $valid = Type::readString($this->type, $data);
@@ -243,7 +244,13 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
     {
         $enumOk = false;
         foreach ($this->enum as $item) {
-            if ($item === $data) {
+            if ($item === $data ||
+                ( // Int and float equality check.
+                    (is_int($item) || is_float($item)) &&
+                    (is_int($data) || is_float($data)) &&
+                    $item == $data
+                )
+            ) {
                 $enumOk = true;
                 break;
             } else {
@@ -269,7 +276,13 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
      */
     private function processConst($data, $options, $path)
     {
-        if ($this->const !== $data) {
+        if ($this->const !== $data &&
+            !( // Int and float equality.
+                (is_int($this->const) || is_float($this->const)) &&
+                (is_int($data) || is_float($data)) &&
+                $this->const == $data
+            )
+        ) {
             if ((is_object($this->const) && is_object($data))
                 || (is_array($this->const) && is_array($data))) {
                 $diff = new JsonDiff($this->const, $data,
@@ -425,7 +438,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
             try {
                 $result = self::unboolSchema($item)->process($data, $options, $path . '->oneOf[' . $index . ']');
                 $successes++;
-                if ($successes > 1 || $options->skipValidation) {
+                if ($successes > 1 || $options->skipValidation) { // @phpstan-ignore-line
                     break;
                 }
             } catch (InvalidValue $exception) {
@@ -607,10 +620,13 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
 
                 if ($this->useObjectAsArray) {
                     $result = array();
-                } elseif (!$result instanceof ObjectItemContract) {
+                } else {
                     //* todo check performance impact
                     if (null === $this->objectItemClass) {
-                        $result = new ObjectItem();
+                        if (!$result instanceof ObjectItemContract) {
+                            $result = new ObjectItem();
+                            $result->setDocumentPath($path);
+                        }
                     } else {
                         $className = $this->objectItemClass;
                         if ($options->objectItemClassMapping !== null) {
@@ -618,26 +634,23 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                                 $className = $options->objectItemClassMapping[$className];
                             }
                         }
-                        $result = new $className;
-                    }
-                    //*/
-
-
-                    if ($result instanceof ClassStructure) {
-                        if ($result->__validateOnSet) {
-                            $result->__validateOnSet = false;
-                            /** @noinspection PhpUnusedLocalVariableInspection */
-                            /* todo check performance impact
-                            $validateOnSetHandler = new ScopeExit(function () use ($result) {
-                                $result->__validateOnSet = true;
-                            });
+                        if (null === $result || get_class($result) !== $className) {
+                            $result = new $className;
+                            //* todo check performance impact
+                            if ($result instanceof ClassStructure) {
+                                $result->setDocumentPath($path);
+                                if ($result->__validateOnSet) {
+                                    $result->__validateOnSet = false;
+                                    /** @noinspection PhpUnusedLocalVariableInspection */
+                                    /* todo check performance impact
+                                    $validateOnSetHandler = new ScopeExit(function () use ($result) {
+                                        $result->__validateOnSet = true;
+                                    });
+                                    //*/
+                                }
+                            }
                             //*/
                         }
-                    }
-
-                    //* todo check performance impact
-                    if ($result instanceof ObjectItemContract) {
-                        $result->setDocumentPath($path);
                     }
                     //*/
                 }
@@ -797,9 +810,23 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
             && $properties !== null
         ) {
             foreach ($properties as $key => $property) {
+                $allowNull = false;
+                if ($property instanceof HasDefault) {
+                    if (!$property->hasDefault()) {
+                        continue;
+                    }
+
+                    $allowNull = true;
+                }
+
                 // todo check when property is \stdClass `{}` here (RefTest)
-                if ($property instanceof SchemaContract && null !== $default = $property->getDefault()) {
+                if ($property instanceof SchemaContract) {
                     if (!array_key_exists($key, $array)) {
+                        $default = $property->getDefault();
+                        if (null === $default && !$allowNull) { // @phpstan-ignore-line
+                            continue;
+                        }
+
                         $defaultApplied[$key] = true;
                         $array[$key] = $default;
                     }
@@ -812,7 +839,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
          * @var mixed $value
          */
         foreach ($array as $key => $value) {
-            if ($key === '' && PHP_VERSION_ID < 71000) {
+            if ($key === '' && PHP_VERSION_ID < 70100) {
                 return $this->fail(new InvalidValue('Empty property name'), $path, $options);
             }
 
@@ -925,7 +952,9 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
                     if ($found || !$import) {
                         $result->$propertyName = $value;
                     } elseif (!isset($result->$propertyName)) {
-                        $result->$propertyName = $value;
+                        if (self::PROP_REF !== $propertyName || empty($result->__fromRef)) {
+                            $result->$propertyName = $value;
+                        }
                     }
                 }
             }
@@ -961,6 +990,9 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
         $this->items = self::unboolSchema($this->items);
         if ($this->items instanceof SchemaContract) {
             $items = array();
+            /**
+             * @var null|bool|Schema $additionalItems
+             */
             $additionalItems = $this->items;
         } elseif ($this->items === null) { // items defaults to empty schema so everything is valid
             $items = array();
@@ -973,7 +1005,6 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
 
         /**
          * @var Schema|Schema[] $items
-         * @var null|bool|Schema $additionalItems
          */
         $itemsLen = is_array($items) ? count($items) : 0;
         $index = 0;
@@ -1130,10 +1161,6 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
             $data = $options->dataPreProcessor->process($data, $this, $import);
         }
 
-        if ($result === null) {
-            $result = $data;
-        }
-
         if ($options->skipValidation) {
             goto skipValidation;
         }
@@ -1167,6 +1194,10 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
         }
 
         skipValidation:
+
+        if ($result === null) {
+            $result = $data;
+        }
 
         if ($this->oneOf !== null) {
             $result = $this->processOneOf($data, $options, $path);
@@ -1350,12 +1381,12 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
     }
 
     /**
-     * Resolves boolean schema into Schema instance
+     * Resolves boolean schema into Schema instance.
      *
      * @param mixed $schema
      * @return mixed|Schema
      */
-    private static function unboolSchema($schema)
+    public static function unboolSchema($schema)
     {
         static $trueSchema;
         static $falseSchema;
@@ -1378,10 +1409,12 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
     }
 
     /**
+     * Converts bool value into an object schema.
+     *
      * @param mixed $data
      * @return \stdClass
      */
-    private static function unboolSchemaData($data)
+    public static function unboolSchemaData($data)
     {
         static $trueSchema;
         static $falseSchema;
@@ -1404,6 +1437,14 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract
     public function getDefault()
     {
         return $this->default;
+    }
+
+    /**
+     * @return bool
+     */
+    public function hasDefault()
+    {
+        return array_key_exists(self::DEFAULT_PROPERTY, $this->__arrayOfData);
     }
 
     /**
