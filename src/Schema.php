@@ -568,7 +568,7 @@ class Schema extends JsonSchema implements MetaHolder, SchemaContract, HasDefaul
     {
         foreach ($this->required as $item) {
             if (!array_key_exists($item, $array)) {
-                $this->fail(new ObjectException('Required property missing: ' . $item . ', data: ' . json_encode($array, JSON_UNESCAPED_SLASHES), ObjectException::REQUIRED), $path);
+                $this->fail(new ObjectException('Required property missing: ' . $item . ', data: ' . json_encode($array, JSON_UNESCAPED_SLASHES), ObjectException::REQUIRED), $path, $options);
             }
         }
     }
